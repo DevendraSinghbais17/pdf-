@@ -9,31 +9,40 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Set up Java JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Install Generic Gradle
-        uses: gradle/actions/setup-gradle@v3
+      - name: Install Global Gradle
+        uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.2' # A standard modern version compatible with Kotlin/Compose
+          gradle-version: '8.2'
 
-      - name: Generate missing Gradle Wrapper
-        run: gradle wrapper
-
-      - name: Make Gradle Executable
-        run: chmod +x ./gradlew
-
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug
+      - name: Build Debug APK (No Wrapper Needed)
+        run: |
+          # 1. Search the repository for the main settings file
+          SETTINGS_FILE=$(find . -name "settings.gradle*" | head -n 1)
+          
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "Could not find settings.gradle, attempting to build in root."
+            gradle assembleDebug
+          else
+            # 2. Automatically navigate to wherever the project is hidden
+            PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+            echo "Project found at: $PROJECT_DIR"
+            cd "$PROJECT_DIR"
+            
+            # 3. Build using the global Gradle tool instead of the local wrapper
+            gradle assembleDebug
+          fi
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-          
+          # The ** allows it to find the APK no matter how deep the folders go
+          path: '**/app/build/outputs/apk/debug/*.apk'
