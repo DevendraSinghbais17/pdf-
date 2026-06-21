@@ -1,0 +1,6 @@
+{
+  "name": "Book, Game & Torrent Finder",
+  "description": "Find free PDFs, public domain eBooks, legal abandonware, retro web games, torrents and magnets in one search.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
