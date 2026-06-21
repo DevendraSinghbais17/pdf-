@@ -109,3 +109,14 @@ data class TorrentSearchResponse(
     val results: List<TorrentResult>
 )
 
+@JsonClass(generateAdapter = true)
+data class ReadBook(
+    val id: String = "",
+    val title: String = "",
+    val author: String = "",
+    val rating: Int = 5,
+    val notes: String = "",
+    val dateRead: String = "",
+    val timestamp: Long = System.currentTimeMillis()
+)
+

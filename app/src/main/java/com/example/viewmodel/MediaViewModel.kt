@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
+import com.example.api.FirebaseBookSyncManager
 import com.example.api.GeminiClient
 import com.example.db.AppDatabase
 import com.example.db.MediaRepository
@@ -21,13 +22,16 @@ enum class SearchTab {
     BOOKS,
     TORRENTS,
     GAMES,
-    BOOKMARKS
+    BOOKMARKS,
+    READ_LOG
 }
 
 class MediaViewModel(
     application: Application,
     private val repository: MediaRepository
 ) : AndroidViewModel(application) {
+
+    val firebaseSync = FirebaseBookSyncManager(application)
 
     // --- State Observables ---
     private val _searchQuery = MutableStateFlow("")
@@ -100,10 +104,11 @@ class MediaViewModel(
     val bookmarkedTitles: StateFlow<Set<String>> = _bookmarkedTitles.asStateFlow()
 
     init {
-        // Automatically sync the bookmark check logic
+        // Automatically sync the bookmark check logic and back up bookmarks to firebase
         viewModelScope.launch {
             bookmarks.collect { list ->
                 _bookmarkedTitles.value = list.map { "${it.title}_${it.type}" }.toSet()
+                firebaseSync.syncBookmarksToFirebase(list)
             }
         }
     }
@@ -461,6 +466,7 @@ class MediaViewModel(
                 }
             }
             SearchTab.BOOKMARKS -> {}
+            SearchTab.READ_LOG -> {}
         }
     }
 
@@ -670,6 +676,19 @@ class MediaViewModel(
                 description = "Universal open-source kernel installer offering absolute stability, thousands of free packages, and total security."
             )
         )
+    }
+
+    fun saveReadBook(title: String, author: String, rating: Int, notes: String, dateRead: String) {
+        firebaseSync.saveReadBook(title, author, rating, notes, dateRead)
+    }
+
+    fun deleteReadBook(bookId: String) {
+        firebaseSync.deleteReadBook(bookId)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        firebaseSync.cleanup()
     }
 }
 

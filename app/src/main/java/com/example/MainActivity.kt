@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -47,6 +48,7 @@ import com.example.model.BookResult
 import com.example.model.GameResult
 import com.example.model.SavedMedia
 import com.example.model.TorrentResult
+import com.example.model.ReadBook
 import com.example.ui.theme.MyApplicationTheme
 import com.example.viewmodel.MediaViewModel
 import com.example.viewmodel.MediaViewModelFactory
@@ -56,6 +58,9 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -119,6 +124,10 @@ fun MediaSeekerApp(
     val recentQueries by viewModel.recentQueries.collectAsStateWithLifecycle()
     var bookmarkFilterType by remember { mutableStateOf("ALL") }
 
+    val readBooks by viewModel.firebaseSync.readBooks.collectAsStateWithLifecycle()
+    val firebaseLoaded by viewModel.firebaseSync.firebaseLoaded.collectAsStateWithLifecycle()
+    var showAddReadBookDialog by remember { mutableStateOf(false) }
+
     val openWebOrPdf: (String?) -> Unit = { url ->
         if (url != null) {
             if (url.startsWith("magnet:") || url.startsWith("intent:")) {
@@ -169,7 +178,7 @@ fun MediaSeekerApp(
         }
 
         // --- Dynamic Search input with Action controls ---
-        if (selectedTab != SearchTab.BOOKMARKS) {
+        if (selectedTab != SearchTab.BOOKMARKS && selectedTab != SearchTab.READ_LOG) {
             SearchInputSection(
                 query = searchQuery,
                 onQueryChange = { viewModel.updateSearchQuery(it) },
@@ -311,26 +320,9 @@ fun MediaSeekerApp(
 
         // --- Search/Content Loading Status ---
         if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(
-                        color = Color(0xFFBB86FC),
-                        strokeWidth = 3.dp,
-                        modifier = Modifier.testTag("search_loader")
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "Querying digital libraries...",
-                        color = Color.LightGray,
-                        fontSize = 14.sp
-                    )
-                }
-            }
+            GeminiLoadingSpinner(
+                isGeminiActive = viewModel.isApiKeyWorking()
+            )
         } else {
             // Display Results
             if (searchQuery.isNotBlank() && selectedTab != SearchTab.BOOKMARKS) {
@@ -501,6 +493,156 @@ fun MediaSeekerApp(
                         }
                     }
                 }
+                SearchTab.READ_LOG -> {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Header with Cloud Connection Status
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF2E3033))
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(if (firebaseLoaded) Color(0xFFC1F8C2) else Color(0xFFFFB74D))
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = if (firebaseLoaded) "Firebase Synced" else "Connecting Firebase...",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Text(
+                                text = "Node ID: ${viewModel.firebaseSync.userId}",
+                                color = Color(0xFFFFD54F),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // Add Entry Button
+                        Button(
+                            onClick = { showAddReadBookDialog = true },
+                            modifier = Modifier.fillMaxWidth().testTag("add_journal_button"),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFD0BCFF),
+                                contentColor = Color(0xFF381E72)
+                            ),
+                            shape = RoundedCornerShape(20.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Add read history item",
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Log a Book I've Read", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+
+                        if (readBooks.isEmpty()) {
+                            EmptyStatePanel(
+                                title = "Your Portable Reading Diary",
+                                description = "Keep a personal reading journal! Put down notes/reviews, star ratings, and keep a catalog of completed books, automatically synchronized with Google Firebase!",
+                                icon = Icons.Default.Star
+                            )
+                        } else {
+                            Text(
+                                text = "Books Logged (${readBooks.size})",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+                            )
+
+                            readBooks.forEach { log ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(Color(0xFF1E1E24))
+                                        .border(1.dp, Color(0xFF2E3033), RoundedCornerShape(16.dp))
+                                        .padding(14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = log.title,
+                                            color = Color.White,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = "by ${log.author}",
+                                            color = Color.LightGray,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        
+                                        // Star Rating
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            (1..5).forEach { star ->
+                                                Icon(
+                                                    imageVector = Icons.Default.Star,
+                                                    contentDescription = null,
+                                                    tint = if (star <= log.rating) Color(0xFFFFD54F) else Color(0xFF555555),
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                        
+                                        if (log.notes.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = log.notes,
+                                                color = Color(0xFFCAC4D0),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Normal
+                                            )
+                                        }
+                                        if (log.dateRead.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = "Completed: ${log.dateRead}",
+                                                color = Color(0xFFA5A2A9),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                    
+                                    IconButton(
+                                        onClick = { viewModel.deleteReadBook(log.id) },
+                                        modifier = Modifier.size(32.dp).testTag("delete_journal_item_${log.id}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Remove review logging",
+                                            tint = Color(0xFFFF8A80),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(18.dp))
+                    }
+                }
             }
         }
         
@@ -510,6 +652,152 @@ fun MediaSeekerApp(
     }
 
     // --- Dynamic Interactive Dialogs ---
+
+    if (showAddReadBookDialog) {
+        var titleInput by remember { mutableStateOf("") }
+        var authorInput by remember { mutableStateOf("") }
+        var ratingInput by remember { mutableStateOf(5) }
+        var notesInput by remember { mutableStateOf("") }
+        var dateInput by remember { mutableStateOf("") }
+
+        AlertDialog(
+            onDismissRequest = { showAddReadBookDialog = false },
+            title = {
+                Text(
+                    text = "Log Book Read",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedTextField(
+                        value = titleInput,
+                        onValueChange = { titleInput = it },
+                        label = { Text("Book Title") },
+                        modifier = Modifier.fillMaxWidth().testTag("add_book_title_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFFD0BCFF),
+                            unfocusedBorderColor = Color.Gray
+                        ),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = authorInput,
+                        onValueChange = { authorInput = it },
+                        label = { Text("Author / Creator") },
+                        modifier = Modifier.fillMaxWidth().testTag("add_book_author_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFFD0BCFF),
+                            unfocusedBorderColor = Color.Gray
+                        ),
+                        singleLine = true
+                    )
+
+                    // Stars rating selector
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "My Rating:",
+                            color = Color.LightGray,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            (1..5).forEach { star ->
+                                Icon(
+                                    imageVector = Icons.Default.Star,
+                                    contentDescription = "Rate $star stars",
+                                    tint = if (star <= ratingInput) Color(0xFFFFD54F) else Color.Gray,
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clickable { ratingInput = star }
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = notesInput,
+                        onValueChange = { notesInput = it },
+                        label = { Text("Review Notes / Thoughts") },
+                        modifier = Modifier.fillMaxWidth().height(100.dp).testTag("add_book_notes_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFFD0BCFF),
+                            unfocusedBorderColor = Color.Gray
+                        ),
+                        maxLines = 4
+                    )
+
+                    OutlinedTextField(
+                        value = dateInput,
+                        onValueChange = { dateInput = it },
+                        label = { Text("Completion Date (e.g. June 2026)") },
+                        modifier = Modifier.fillMaxWidth().testTag("add_book_date_input"),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFFD0BCFF),
+                            unfocusedBorderColor = Color.Gray
+                        ),
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (titleInput.trim().isNotBlank()) {
+                            viewModel.saveReadBook(
+                                title = titleInput.trim(),
+                                author = authorInput.trim().ifBlank { "Unknown" },
+                                rating = ratingInput,
+                                notes = notesInput.trim(),
+                                dateRead = dateInput.trim().ifBlank { "Recent" }
+                            )
+                            showAddReadBookDialog = false
+                            Toast.makeText(context, "Logged to Firebase Realtime Database!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Title is mandatory to log book", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFD0BCFF),
+                        contentColor = Color(0xFF381E72)
+                    ),
+                    modifier = Modifier.testTag("submit_journal_button")
+                ) {
+                    Text("Save to Cloud")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showAddReadBookDialog = false },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.Gray)
+                ) {
+                    Text("Cancel")
+                }
+            },
+            containerColor = Color(0xFF2E3033),
+            titleContentColor = Color.White
+        )
+    }
 
     // 1. API Configuration & Library Help Dialog
     if (showHelpDialog) {
@@ -1123,6 +1411,7 @@ fun TabSwitcherSection(
                 SearchTab.TORRENTS -> "Torrents"
                 SearchTab.GAMES -> "Retro Games"
                 SearchTab.BOOKMARKS -> "Saved"
+                SearchTab.READ_LOG -> "Read Diary"
             }
             
             val iconVector = when (tab) {
@@ -1130,6 +1419,7 @@ fun TabSwitcherSection(
                 SearchTab.TORRENTS -> Icons.Default.Share
                 SearchTab.GAMES -> Icons.Default.PlayArrow
                 SearchTab.BOOKMARKS -> Icons.Default.Favorite
+                SearchTab.READ_LOG -> Icons.Default.Star
             }
 
             Box(
@@ -2166,62 +2456,274 @@ fun InAppWebViewReader(
 
             // Main WebView component wrapper
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                AndroidView(
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            this.webViewClient = object : WebViewClient() {
-                                override fun onPageStarted(view: WebView?, loadingUrl: String?, favicon: android.graphics.Bitmap?) {
-                                    super.onPageStarted(view, loadingUrl, favicon)
-                                    isPageLoading.value = true
-                                    currentUrl.value = loadingUrl ?: ""
-                                }
-
-                                override fun onPageFinished(view: WebView?, loadedUrl: String?) {
-                                    super.onPageFinished(view, loadedUrl)
-                                    isPageLoading.value = false
-                                    currentUrl.value = loadedUrl ?: ""
-                                }
-
-                                override fun onReceivedSslError(view: WebView?, handler: android.webkit.SslErrorHandler?, error: android.net.http.SslError?) {
-                                    handler?.proceed() // Proceed for self-signed shadow libraries PDFs
-                                }
-
-                                override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                                    val u = request?.url?.toString() ?: return false
-                                    if (u.startsWith("magnet:") || u.startsWith("intent:") || u.startsWith("tel:") || u.startsWith("mailto:")) {
-                                        try {
-                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(u))
-                                            context.startActivity(intent)
-                                        } catch (e: Exception) {
-                                            Toast.makeText(context, "No app available to handle download.", Toast.LENGTH_SHORT).show()
-                                        }
-                                        return true
+                key(finalUrl) {
+                    AndroidView(
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                this.webViewClient = object : WebViewClient() {
+                                    override fun onPageStarted(view: WebView?, loadingUrl: String?, favicon: android.graphics.Bitmap?) {
+                                        super.onPageStarted(view, loadingUrl, favicon)
+                                        isPageLoading.value = true
+                                        currentUrl.value = loadingUrl ?: ""
                                     }
-                                    return false
+
+                                    override fun onPageFinished(view: WebView?, loadedUrl: String?) {
+                                        super.onPageFinished(view, loadedUrl)
+                                        isPageLoading.value = false
+                                        currentUrl.value = loadedUrl ?: ""
+                                    }
+
+                                    override fun onReceivedSslError(view: WebView?, handler: android.webkit.SslErrorHandler?, error: android.net.http.SslError?) {
+                                        handler?.proceed() // Proceed for self-signed shadow libraries PDFs
+                                    }
+
+                                    override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                        val u = request?.url?.toString() ?: return false
+                                        if (u.startsWith("magnet:") || u.startsWith("intent:") || u.startsWith("tel:") || u.startsWith("mailto:")) {
+                                            try {
+                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(u))
+                                                context.startActivity(intent)
+                                            } catch (e: Exception) {
+                                                Toast.makeText(context, "No app available to handle download.", Toast.LENGTH_SHORT).show()
+                                            }
+                                            return true
+                                        }
+                                        return false
+                                    }
                                 }
+                                settings.apply {
+                                    javaScriptEnabled = true
+                                    domStorageEnabled = true
+                                    builtInZoomControls = true
+                                    displayZoomControls = false
+                                    loadWithOverviewMode = true
+                                    useWideViewPort = true
+                                    setSupportZoom(true)
+                                    mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                    userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                                }
+                                webView = this
+                                loadUrl(finalUrl)
                             }
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                builtInZoomControls = true
-                                displayZoomControls = false
-                                loadWithOverviewMode = true
-                                useWideViewPort = true
-                                setSupportZoom(true)
-                                mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-                            }
-                            webView = this
-                            loadUrl(finalUrl)
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                    update = { view ->
-                        if (view.url != finalUrl) {
-                            view.loadUrl(finalUrl)
-                        }
-                    }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                        update = { /* Handled automatically by Compose key recreation when finalUrl changes */ }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun GeminiLoadingSpinner(
+    isGeminiActive: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "loading_animation")
+    
+    // Outer arc rotation
+    val outerRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800, easing = LinearEasing)
+        ),
+        label = "outer_rotation"
+    )
+    
+    // Inner arc rotation (opposite direction)
+    val innerRotation by infiniteTransition.animateFloat(
+        initialValue = 360f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing)
+        ),
+        label = "inner_rotation"
+    )
+    
+    // Breathing scale for the central icon
+    val iconScale by infiniteTransition.animateFloat(
+        initialValue = 0.85f,
+        targetValue = 1.15f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "icon_scale"
+    )
+
+    // Pulse alpha for the center icon glow background
+    val glowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.2f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "glow_alpha"
+    )
+
+    // Dynamic list of loading tips/actions
+    val phrases = if (isGeminiActive) {
+        listOf(
+            "Igniting Gemini API model...",
+            "Analyzing query intent with AI...",
+            "Scanning global digital libraries...",
+            "Consulting digital shadow archives...",
+            "Synthesizing download links...",
+            "Structuring response payload..."
+        )
+    } else {
+        listOf(
+            "Searching cached catalog index...",
+            "Parsing query keywords...",
+            "Scanning offline database tables...",
+            "Retrieving local archive matches...",
+            "Applying match filtering..."
+        )
+    }
+
+    var currentPhraseIndex by remember { mutableStateOf(0) }
+    
+    // Cycle phrases every 1800 ms
+    LaunchedEffect(isGeminiActive) {
+        currentPhraseIndex = 0
+        while (true) {
+            kotlinx.coroutines.delay(1800)
+            currentPhraseIndex = (currentPhraseIndex + 1) % phrases.size
+        }
+    }
+
+    // Outer & inner ring colors depending on Gemini connection state
+    val outerColor1 = if (isGeminiActive) Color(0xFFD0BCFF) else Color(0xFFFFB74D) // Purple vs Orange
+    val outerColor2 = if (isGeminiActive) Color(0xFF03DAC6) else Color(0xFFCAC4D0) // Teal vs Gray
+    
+    val innerColor = if (isGeminiActive) Color(0xFF9575CD) else Color(0xFFFFCC80)
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 24.dp)
+            .testTag("search_loader"), // Match previous component testTag
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        // Glowing animated target box
+        Box(
+            modifier = Modifier.size(100.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            // Background blur/glow aura in the center
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .graphicsLayer(
+                        scaleX = iconScale * 1.2f,
+                        scaleY = iconScale * 1.2f,
+                        alpha = glowAlpha
+                    )
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                outerColor1.copy(alpha = 0.4f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+
+            // Canvas drawing for the custom rotating rings and arcs
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val strokeWidth = 4.dp.toPx()
+                
+                // Draw Outer Arc
+                drawArc(
+                    brush = Brush.sweepGradient(
+                        colors = listOf(outerColor1, outerColor2, outerColor1.copy(alpha = 0.1f))
+                    ),
+                    startAngle = outerRotation,
+                    sweepAngle = 280f,
+                    useCenter = false,
+                    style = Stroke(width = strokeWidth)
                 )
+
+                // Draw Inner Arc (opposite direction and slightly smaller)
+                val innerPadding = 12.dp.toPx()
+                drawArc(
+                    brush = Brush.sweepGradient(
+                        colors = listOf(innerColor, innerColor.copy(alpha = 0.2f), innerColor)
+                    ),
+                    startAngle = innerRotation,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    style = Stroke(width = strokeWidth * 0.75f),
+                    size = this.size.copy(
+                        width = this.size.width - innerPadding * 2,
+                        height = this.size.height - innerPadding * 2
+                    ),
+                    topLeft = Offset(innerPadding, innerPadding)
+                )
+            }
+
+            // Central icon
+            IconButton(
+                onClick = {},
+                enabled = false,
+                modifier = Modifier
+                    .graphicsLayer(
+                        scaleX = iconScale,
+                        scaleY = iconScale
+                    )
+                    .size(40.dp)
+            ) {
+                Icon(
+                    imageVector = if (isGeminiActive) Icons.Default.Star else Icons.Default.Search,
+                    contentDescription = if (isGeminiActive) "Gemini active indicator" else "Offline search indicator",
+                    tint = if (isGeminiActive) Color(0xFFFFD54F) else Color.White,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        // Animated statement transitioning
+        Crossfade(
+            targetState = phrases.getOrElse(currentPhraseIndex) { "" },
+            animationSpec = tween(durationMillis = 400),
+            label = "phrase_transition"
+        ) { phraseText ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = phraseText,
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                
+                Spacer(modifier = Modifier.height(4.dp))
+                
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(if (isGeminiActive) Color(0xFFD0BCFF) else Color(0xFFFFCC80))
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isGeminiActive) "Dynamic Gemini API Search" else "Offline Catalog Search",
+                        color = Color.Gray,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
     }
