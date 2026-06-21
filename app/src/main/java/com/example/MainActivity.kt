@@ -5,6 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -143,20 +145,225 @@ fun MediaSeekerApp(
     val popularTorrentShortcuts = listOf("Ubuntu", "Sintel", "Night of the Living Dead", "Big Buck Bunny", "Tears of Steel")
     val popularGameShortcuts = listOf("Doom", "Prince of Persia", "The Oregon Trail", "SimCity", "Monkey Island")
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color(0xFF1A1C1E))
-            .padding(horizontal = 16.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        Spacer(modifier = Modifier.height(16.dp))
+    val customApiKey by viewModel.customApiKey.collectAsStateWithLifecycle()
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val coroutineScope = rememberCoroutineScope()
 
-        // --- Custom Gradient Hero Header ---
-        HeaderSection(
-            isApiKeyWorking = viewModel.isApiKeyWorking(),
-            onHelpClick = { showHelpDialog = true }
-        )
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = Color(0xFF212327),
+                drawerTonalElevation = 8.dp
+            ) {
+                // Header with app icon and title
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color(0xFF322359), Color(0xFF212327))
+                            )
+                        )
+                        .padding(horizontal = 24.dp, vertical = 28.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFD0BCFF)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = "Nexus Menu",
+                                tint = Color(0xFF381E72),
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "Nexus Archive",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Gemini Search Companion",
+                                fontSize = 12.sp,
+                                color = Color(0xFFCAC4D0)
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = Color(0xFF3B3F43), thickness = 1.dp)
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Scrollable content of the drawer
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 12.dp)
+                ) {
+                    Text(
+                        text = "SEARCH CATEGORIES",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFCAC4D0),
+                        modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+                    )
+
+                    // Navigation items for search tabs
+                    listOf(
+                        SearchTab.BOOKS to "Books & Manga" to Icons.Default.List,
+                        SearchTab.TORRENTS to "Torrents & Magnet" to Icons.Default.Share,
+                        SearchTab.GAMES to "Classic Retro Games" to Icons.Default.PlayArrow,
+                        SearchTab.BOOKMARKS to "Saved Bookmarks" to Icons.Default.Favorite,
+                        SearchTab.READ_LOG to "Reading Diary" to Icons.Default.Star
+                    ).forEach { (tabNameInfo, icon) ->
+                        val (tab, name) = tabNameInfo
+                        NavigationDrawerItem(
+                            label = { Text(name, fontWeight = FontWeight.Medium) },
+                            selected = selectedTab == tab,
+                            onClick = {
+                                viewModel.selectTab(tab)
+                                coroutineScope.launch { drawerState.close() }
+                            },
+                            icon = { Icon(icon, contentDescription = name) },
+                            colors = NavigationDrawerItemDefaults.colors(
+                                selectedContainerColor = Color(0xFF381E72),
+                                selectedIconColor = Color(0xFFEADBFF),
+                                selectedTextColor = Color(0xFFEADBFF),
+                                unselectedContainerColor = Color.Transparent,
+                                unselectedIconColor = Color(0xFFCAC4D0),
+                                unselectedTextColor = Color(0xFFCAC4D0)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+                    HorizontalDivider(color = Color(0xFF3B3F43), thickness = 1.dp)
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Text(
+                        text = "GEMINI API KEY SETTINGS",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFCAC4D0),
+                        modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+                    )
+
+                    // In-app API key settings panel
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF2E3033)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "Enter your Gemini API key below to enable dynamic, real-time deep searches outside of demonstration mode:",
+                                fontSize = 12.sp,
+                                color = Color.White,
+                                lineHeight = 16.sp
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            var apiKeyInput by remember(customApiKey) { mutableStateOf(customApiKey) }
+
+                            OutlinedTextField(
+                                value = apiKeyInput,
+                                onValueChange = { apiKeyInput = it },
+                                label = { Text("Gemini API Key", fontSize = 11.sp, color = Color.LightGray) },
+                                singleLine = true,
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = Color.White),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = Color(0xFFD0BCFF),
+                                    unfocusedBorderColor = Color(0xFFCAC4D0),
+                                    focusedLabelColor = Color(0xFFD0BCFF)
+                                ),
+                                placeholder = { Text("API Key...", fontSize = 11.sp, color = Color.Gray) },
+                                modifier = Modifier.fillMaxWidth().testTag("appkey_textfield")
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        viewModel.updateCustomApiKey(apiKeyInput)
+                                        Toast.makeText(context, "API Key updated successfully!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF381E72)),
+                                    modifier = Modifier.weight(1f).testTag("save_api_key_btn")
+                                ) {
+                                    Text("Save Key", fontSize = 11.sp, color = Color.White)
+                                }
+
+                                if (customApiKey.isNotEmpty()) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            viewModel.updateCustomApiKey("")
+                                            Toast.makeText(context, "API Key cleared.", Toast.LENGTH_SHORT).show()
+                                        },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
+                                        modifier = Modifier.weight(1f).testTag("clear_api_key_btn")
+                                    ) {
+                                        Text("Clear Key", fontSize = 11.sp, color = Color(0xFFFF8A80))
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Text(
+                                text = "💡 No key? Create a free one at ai.google.dev",
+                                fontSize = 10.sp,
+                                color = Color(0xFF03DAC6),
+                                modifier = Modifier.clickable {
+                                    openUrlInBrowser(context, "https://ai.google.dev/")
+                                }
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(30.dp))
+                }
+            }
+        },
+        content = {
+            Column(
+                modifier = modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF1A1C1E))
+                    .padding(horizontal = 16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // --- Custom Gradient Hero Header ---
+                HeaderSection(
+                    isApiKeyWorking = viewModel.isApiKeyWorking(),
+                    onHelpClick = { showHelpDialog = true },
+                    onMenuClick = {
+                        coroutineScope.launch {
+                            drawerState.open()
+                        }
+                    }
+                )
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -1277,6 +1484,8 @@ fun MediaSeekerApp(
             containerColor = Color(0xFF1E1E24)
         )
     }
+}
+)
 
     if (activeInAppWebUrl != null) {
         InAppWebViewReader(
@@ -1305,7 +1514,8 @@ fun openUrlInBrowser(context: Context, url: String?) {
 @Composable
 fun HeaderSection(
     isApiKeyWorking: Boolean,
-    onHelpClick: () -> Unit
+    onHelpClick: () -> Unit,
+    onMenuClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -1318,16 +1528,17 @@ fun HeaderSection(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Box(
+            IconButton(
+                onClick = onMenuClick,
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFD0BCFF)),
-                contentAlignment = Alignment.Center
+                    .background(Color(0xFFD0BCFF))
+                    .testTag("burger_menu_button")
             ) {
                 Icon(
-                    imageVector = Icons.Default.List,
-                    contentDescription = "Archive Icon",
+                    imageVector = Icons.Default.Menu,
+                    contentDescription = "Open Navigation Menu",
                     tint = Color(0xFF381E72),
                     modifier = Modifier.size(24.dp)
                 )

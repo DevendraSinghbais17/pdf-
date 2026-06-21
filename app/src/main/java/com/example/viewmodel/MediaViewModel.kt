@@ -113,8 +113,22 @@ class MediaViewModel(
         }
     }
 
+    private val _customApiKey = MutableStateFlow(sharedPrefs.getString("user_gemini_api_key", "") ?: "")
+    val customApiKey: StateFlow<String> = _customApiKey.asStateFlow()
+
+    fun updateCustomApiKey(key: String) {
+        _customApiKey.value = key.trim()
+        sharedPrefs.edit().putString("user_gemini_api_key", key.trim()).apply()
+    }
+
+    fun getActiveApiKey(): String {
+        val customKey = _customApiKey.value
+        if (customKey.isNotEmpty()) return customKey
+        return BuildConfig.GEMINI_API_KEY
+    }
+
     fun isApiKeyWorking(): Boolean {
-        val key = BuildConfig.GEMINI_API_KEY
+        val key = getActiveApiKey()
         return key.isNotEmpty() && key != "MY_GEMINI_API_KEY" && key != "placeholder"
     }
 
@@ -306,7 +320,7 @@ class MediaViewModel(
     // --- Gemini Search ---
 
     private suspend fun searchWithGemini(query: String) = withContext(Dispatchers.IO) {
-        val apiKey = BuildConfig.GEMINI_API_KEY
+        val apiKey = getActiveApiKey()
         val moshi = GeminiClient.moshiInstance
 
         when (_selectedTab.value) {

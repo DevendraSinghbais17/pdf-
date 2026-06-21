@@ -23,7 +23,7 @@ class GreetingScreenshotTest {
   fun greeting_screenshot() {
     composeTestRule.setContent {
       MyApplicationTheme {
-        HeaderSection(isApiKeyWorking = false, onHelpClick = {})
+        HeaderSection(isApiKeyWorking = false, onHelpClick = {}, onMenuClick = {})
       }
     }
 
